@@ -1,7 +1,8 @@
 import numpy as np
 import ipdb
 import pprint
-
+import logging
+import utils
 
 class PID:
     """
@@ -9,13 +10,14 @@ class PID:
     """
 
     def __init__(self, P=np.array([1.0, 1.0]), 
-                       I=np.array([0.0, 0.0]),
-                       D=np.array([0.0,0.0]), 
-                       Derivator=np.array([0.0, 0.0]),
-                       Integrator=np.array([0.0, 0.0]), 
-                       Integrator_max=20, 
-                       Deadband = 0.0, #0.33''/pixel->.33 pix=0.1 "
-                       Correction_max = float("inf")):
+                 I=np.array([0.0, 0.0]),
+                 D=np.array([0.0,0.0]), 
+                 Derivator=np.array([0.0, 0.0]),
+                 Integrator=np.array([0.0, 0.0]), 
+                 Integrator_max=20, 
+                 Deadband = 0.0, #0.33''/pixel->.33 pix=0.1 "
+                 Correction_max = float("inf"),
+                 logger=None):
 
         self.Kp=P
         self.Ki=I
@@ -28,11 +30,18 @@ class PID:
         self.Correction_max = Correction_max
         self.set_point=0.0
         self.error=0.0
+        if logger == None:
+            self.logger = utils.setup_logger(base_directory + '/log/',
+                                             'pid')
+        else:
+            self.logger = logger
+        
     def update(self,current_value):
         """
         Calculate PID output value for given reference input and feedback
         """
         self.error = self.set_point - current_value
+        self.logger.info("Tracking Error:" + str(self.error))
 
         for i in range(len(self.error)):
             if np.abs(self.error[i])<self.deadband:
@@ -58,6 +67,7 @@ class PID:
 
         self.I_value = self.Integrator * self.Ki
 
+        self.logger.info("PID: P_x: %f I_x:%f D_x:%f P_y: %f I_y:%f D_y:%f" % (self.P_value[0],self.I_value[0],self.D_value[0],self.P_value[1],self.I_value[1],self.D_value[1]))
         PID = self.P_value + self.I_value + self.D_value
         #for j in range(len(PID)):
         #    if abs(PID[j])>self.Correction_max:
@@ -73,8 +83,9 @@ class PID:
         Initilize the setpoint of PID
         """
         self.set_point = set_point
-        self.Integrator=np.array([0.0, 0.0])
-        self.Derivator=np.array([0.0, 0.0])
+        # Should be able to update setpoint without restarting entirely. JEK
+        #        self.Integrator=np.array([0.0, 0.0])
+        #        self.Derivator=np.array([0.0, 0.0])
 
     def setIntegrator(self, Integrator):
         self.Integrator = Integrator
