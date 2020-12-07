@@ -105,13 +105,11 @@ class TresGUI(QWidget):
         self.region_ycen = self.roi_ydim/2
         self.region_radius = 20
 
-        self.receive_task = asyncio.create_task(
+        self.receive_task = asyncio.ensure_future(
             self.receive_telem(self.on_guider_data,
                                self.config['REDIS_SERVER'],
                                self.config['REDIS_PORT'],
                                'guider_data'))
-
-        event_loop.append(self.receive_task)
 
 #-------------------------------------------------------------------------------
 #    async def master(self):
@@ -149,7 +147,7 @@ class TresGUI(QWidget):
 #-------------------------------------------------------------------------------
     def replot_counts(self):
         # bucket counts plot
-        print('entering replot_counts')
+#        print('entering replot_counts')
         
         self.plot_counts_cnt += 1
         initplots = False        
@@ -186,7 +184,7 @@ class TresGUI(QWidget):
 #         self.gdrbax.axhline(-1.5, 0, 1, color = 'g')
 #         self.gdrbax.axhline(-3.0, 0, 1, color = 'y')
         self.ui.bcountsMplwidget.draw()
-        print('leaving replot_counts')
+#        print('leaving replot_counts')
 
 #-------------------------------------------------------------------------------
     def replot_focus(self):
@@ -230,7 +228,7 @@ class TresGUI(QWidget):
             
 #-------------------------------------------------------------------------------
     def replot_tilts(self):
-        print('entering replot_tilts')
+#        print('entering replot_tilts')
         
         self.plot_tilt_cnt += 1
         initplots = False        
@@ -267,11 +265,11 @@ class TresGUI(QWidget):
 #         self.gdrtax.axhline(-1.5, 0, 1, color = 'g')
 #         self.gdrtax.axhline(-3.0, 0, 1, color = 'y')
         self.ui.azelMplwidget.draw()
-        print('leaving replot_tilts')
+#        print('leaving replot_tilts')
             
  #------------------------------------------------------------------------------
     def on_guider_data(self,new_data):
-        print("Received guider data");
+#        print("Received guider data");
         ts = new_data['timestamp']
         tstamp  = datetime.datetime.strptime(ts,'%Y-%m-%dT%H:%M:%S.%f')
         newtime = dates.date2num(tstamp)
@@ -299,7 +297,7 @@ class TresGUI(QWidget):
 
 #        self.ds9.set('regions', 'image; circle(%f,%f,%f)' %
 #                     (self.region_xcen,self.region_ycen,self.region_radius))
-        print(new_data)
+#        print(new_data)
         self.replot_tilts()
         self.replot_focus()
         self.replot_counts()
@@ -376,11 +374,15 @@ if __name__ == "__main__":
     
     app = QApplication(sys.argv)
     loop = QEventLoop(app)
+    loop.set_debug(True)
     asyncio.set_event_loop(loop)
 
     tresgui = TresGUI(base_directory,config_file,loop)
     tresgui.show()
-
+    
+    if sys.version_info[0] == 3 and sys.version_info[1] >= 8:
+        asyncio.events._set_running_loop(loop)
+        
     with loop:
         loop.run_forever()
         
