@@ -7,10 +7,14 @@ import sys, os
 import logging
 import utils
 import numpy as np
+import argparse
+import time
+import redis
 
-class tiptilt:
+class TipTilt:
 
-    def __init__(self, base_directory, config_file, logger=None, simulate=False):
+    def __init__(self, base_directory, config_file, logger=None,
+                 simulate=False):
         self.base_directory=base_directory
         self.config_file = self.base_directory + '/config/' + config_file
 
@@ -18,7 +22,7 @@ class tiptilt:
         
         # set up the log file
         if logger == None:
-            self.logger = utils.setup_logger(base_directory + '/log/', 'calstage')
+            self.logger = utils.setup_logger(base_directory + '/log/', 'tiptilt')
         else: self.logger = logger
         
         # read the config file
@@ -28,6 +32,9 @@ class tiptilt:
             self.logger.error('Config file not found: (' + self.config_file + ')')
             sys.exit()
 
+        self.redis = redis.Redis(host=config['REDIS_SERVER'],
+                                 port=config['REDIS_PORT'])
+            
         # serial number of the TIP/TILT stage and controller
         self.sn = config['SN_TIPTILT']
         self.model = config['MODEL_TIPTILT']
@@ -47,21 +54,17 @@ class tiptilt:
         # use the PI python library to initialize the device
         if not self.simulate: self.tiptilt = GCSDevice()
 
-        # range of motion
-        self.mintip = None
-        self.maxtip = None
-        self.mintilt = None
-        self.maxtilt = None
+        self.get_allowed_ranges()
         
-        self.position = {'A':None,'B':None}
+        self.position = {'A':0.0,'B':0.0}
         
     def get_allowed_ranges(self):
 
         if self.simulate:
-            self.mintip = 0.0
-            self.maxtip = 2.0
-            self.mintilt = 0.0
-            self.maxtilt = 2.0
+            self.mintip = -100.0
+            self.maxtip = 100.0
+            self.mintilt = -100.0
+            self.maxtilt = 100.0
         else:
             self.mintip = self.tiptilt.qTMN()['A']
             self.maxtip = self.tiptilt.qTMX()['A']
@@ -133,6 +136,9 @@ class tiptilt:
         self.position['A'] = tip
         self.position['B'] = tilt
 
+        self.redis.set('tip',tip)
+        self.redis.set('tilt',tilt)
+        
         # wait for move?
         
         # make sure it moved where we wanted
@@ -153,8 +159,10 @@ class tiptilt:
         # translate north & east (arcsec on sky) to 
         # tip and tilt (stage steps)
         # requires angle, magnitude, and flip
-        tip  = ttpos['A'] + self.sign*self.steps_per_arcsec*(north*math.cos(self.theta) - east*math.sin(self.theta))
-        tilt = ttpos['B'] +           self.steps_per_arcsec*(north*math.sin(self.theta) + east*math.cos(self.theta))
+        tip  = (ttpos['A'] + self.sign * self.steps_per_arcsec * (north * math.cos(self.theta) -
+                                                                  east * math.sin(self.theta)))
+        tilt = (ttpos['B'] + self.steps_per_arcsec*(north * math.sin(self.theta) +
+                                                    east * math.cos(self.theta)))
 
         # move the tip/tilt
         return self.move_tip_tilt(tip,tilt)
@@ -173,8 +181,34 @@ class tiptilt:
         return self.tiptilt.qPOS()
         return (self.tiptilt.qPOS('A'),self.tiptilt.qPOS('B'))
 
+    def populate_header(self,hdr):
+        ttpos = self.get_position()
+        hdr['TTTIPPOS'] = (ttpos['A'],
+                           "Tip Position of the tip/tilt stage (urad)")
+        hdr['TTTILPOS'] = (ttpos['B'],
+                           "Tilt Position of the tip/tilt stage (urad)")
+        hdr['TTMODEL'] = (self.model,
+                          "Model number of the tip/tilt stage")
+        hdr['TTSN'] = (self.sn,
+                       "Serial number of the tip/tilt stage")
+        hdr['TTCMODEL'] = (self.model_controller,
+                           "Model number of the tip/tilt stage controller")
+        hdr['TTCSN'] = (self.sn_controller,
+                        "Serial number of the tip/tilt stage controller")
+
+    
+
 if __name__ == '__main__':
 
+
+    parser = argparse.ArgumentParser(description='Control the tip/tilt stage for the TRES front end')
+    parser.add_argument('--home'  , dest='home'  , action='store_true', default=False, help='Move the tip/tilt stage to the center of motion')
+    parser.add_argument('--move1'  , dest='move1'  , action='store_true', default=False, help='Move the tip/tilt stage to the (0,0) extreme')
+    parser.add_argument('--move2'  , dest='move2'  , action='store_true', default=False, help='Move the tip/tilt stage to the (0,2) extreme')
+    parser.add_argument('--move3'  , dest='move3'  , action='store_true', default=False, help='Move the tip/tilt stage to the (2,2) extreme')
+    parser.add_argument('--move4'  , dest='move4'  , action='store_true', default=False, help='Move the tip/tilt stage to the (2,0) extreme')
+    opt = parser.parse_args()
+    
     if socket.gethostname() == 'tres-guider':
         base_directory = '/home/tres/tres-guider'
     else:
@@ -182,14 +216,31 @@ if __name__ == '__main__':
         sys.exit()
 
     config_file = 'tiptilt.ini'
-    tiptilt = tiptilt(base_directory, config_file)
+    tiptilt = TipTilt(base_directory, config_file)
 
     tiptilt.connect()
-    tiptilt.move_tip_tilt(0.2,0.2)
-    print(tiptilt.get_position())
 
-    tiptilt.move_tip_tilt(0.0,0.0)
-    print(tiptilt.get_position())
+    if opt.home:
+        tiptilt.move_tip_tilt(1.0,1.0)
+        time.sleep(5)
+        tiptilt.move_tip_tilt(0.0,0.0)
+        time.sleep(5)
+        tiptilt.move_tip_tilt(2.0,2.0)
+        time.sleep(5)
+        tiptilt.move_tip_tilt(1.0,1.0)
+    elif opt.move1:
+        tiptilt.move_tip_tilt(0.0,0.0)
+    elif opt.move2:
+        tiptilt.move_tip_tilt(0.0,2.0)
+    elif opt.move3:
+        tiptilt.move_tip_tilt(2.0,2.0)
+    elif opt.move4:
+        tiptilt.move_tip_tilt(2.0,0.0)
+
+#    print(tiptilt.get_position())
+
+#    tiptilt.move_tip_tilt(0.0,0.0)
+#    print(tiptilt.get_position())
 
     ipdb.set_trace()
 

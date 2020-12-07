@@ -19,9 +19,9 @@ def setup_logger(path, logger_name):
                         filename=logname,
                         filemode='a')
 
-    # define a Handler which writes INFO messages or higher to sys.stderr
+    # define a Handler which writes ERROR messages or higher to sys.stderr
     console = logging.StreamHandler()
-    console.setLevel(logging.INFO)
+    console.setLevel(logging.ERROR)
     formatter = logging.Formatter(fmt,datefmt=datefmt)
     formatter.converter = time.gmtime
     console.setFormatter(formatter)

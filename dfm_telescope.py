@@ -16,18 +16,20 @@ import datetime
 import select
 
 
-''' 
-this is a telescope class that implements DFM Galil TCS
-'''
+################################################################################
 class Telescope:
-
-    def __init__(self, base_directory, config_file, logger=None, simulate=False):
+    ''' 
+    this is a telescope class that implements DFM Galil TCS
+    '''
+    def __init__(self, base_directory, config_file, logger=None,
+                 simulate=False):
         self.base_directory=base_directory
         self.config_file = self.base_directory + '/config/' + config_file
 
         # set up the log file
         if logger == None:
-            self.logger = utils.setup_logger(base_directory + '/log/', 'telescope')
+            self.logger = utils.setup_logger(base_directory + '/log/',
+                                             'telescope')
         else: self.logger = logger
 
         # read the config file
@@ -37,7 +39,8 @@ class Telescope:
         if os.path.exists(self.config_file):
             config = ConfigObj(self.config_file)
         else:
-            self.logger.error('Config file not found: (' + self.config_file + ')')
+            self.logger.error('Config file not found: (' +
+                              self.config_file + ')')
             sys.exit()
 
         self.server = config['SERVER']
@@ -45,16 +48,21 @@ class Telescope:
         self.epoch = config['EPOCH']
         self.max_jog = float(config['MAX_JOG'])
 
-    # send a command to the Galil TCS
+#-------------------------------------------------------------------------------
     def send(self,cmd, timeout=5.0, readback=True):
+        '''
+        send a command to the Galil TCS
+        '''
         s = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 
         try:
             s.connect((self.server,self.port))
             self.logger.info("Connected")
         except:
-            self.logger.error("No response from the Galil TCS Server (" + self.server +
-                              ':' + str(self.port) + ". Start TCSGalil and try again")
+            self.logger.error("No response from the Galil TCS Server (" +
+                              self.server +
+                              ':' + str(self.port) +
+                              ". Start TCSGalil and try again")
             ipdb.set_trace()
 
             sys.exit() # too harsh?
@@ -84,6 +92,7 @@ class Telescope:
             
         return data
 
+#-------------------------------------------------------------------------------
     def slew(self, raj2000, decj2000):
 
         if self.simulate:
@@ -103,32 +112,44 @@ class Telescope:
             return False
            
         # slew the telescope
-        self.logger.info("moving the telescope to RA (J2000)" + str(raj2000) + ', DEC (J2000):' + str(decj2000))
+        self.logger.info("moving the telescope to RA (J2000)" + str(raj2000) +
+                         ', DEC (J2000):' + str(decj2000))
         if self.simulate:
             time.sleep(1.0)
-        else: self.send("#6," + str(raj2000) + "," + str(decj2000) + "," + str(epoch) + ";")
+        else: self.send("#6," + str(raj2000) + "," + str(decj2000) + "," +
+                        str(epoch) + ";")
         return True
 
-    # this jogs the telescope. Note if it is not in CHASE mode, set_mount_mode must be set to 1(?)
-    # if requested jog is out of range, status['target_out_of_range'] will be True
+#-------------------------------------------------------------------------------
     def offset_target_object(self,east,north):
-
-        # this is a limit imposed by me here. No such limit exists in the telescope
+        '''This jogs the telescope. Note if it is not in CHASE mode, 
+        set_mount_mode must be set to 1(?)
+        if requested jog is out of range, status['target_out_of_range'] will
+        be True
+        '''
+        
+        # this is a limit imposed by me here. No such limit exists in the
+        # telescope
         if abs(east) > self.max_jog or abs(north) > self.max_jog:
-            self.logger.error('Cannot jog more than ' + str(self.max_jog) + '" in any direction')
+            self.logger.error('Cannot jog more than ' + str(self.max_jog) +
+                              '" in any direction')
             
-        return self.send("#7," + str(east) + "," + str(north) + ";", readback=False)
+        return self.send("#7," + str(east) + "," + str(north) + ";",
+                         readback=False)
 
     
+#-------------------------------------------------------------------------------
     def set_mount_mode(self, mode):
         if ((mode != 0) and (mode != 1) and (mode != 2) and (mode != 3)):
             self.logger.error("Supplied mount mode (" + str(mode) +
                               ") not allowed; must be 0 (Hold Position), 1 \
-                              (Follow Target), 2 (Slew to Target), or 3 (Chase Target)")
+                              (Follow Target), 2 (Slew to Target), or \
+                              3 (Chase Target)")
             return False
             
         return self.send("#12," + str(mode) + ";", readback=False)
 
+#-------------------------------------------------------------------------------
     def read_mount_coordinates(self):
         response = self.send("#25;")
 
@@ -137,12 +158,13 @@ class Telescope:
         coords = {}
         if len(arr) == 10:
             # convert date and time to a datetime object
-            # what is a 'decimal year'? It doesn't change often enough to be precise,
-            # nor is it an integer number of days...
+            # what is a 'decimal year'? It doesn't change often enough to be
+            # precise, nor is it an integer number of days...
             year = int(float(arr[9]))
             seconds = (float(arr[9])-year)*365.25*86400.0
             hours = float(arr[8])
-            date = datetime.datetime(year,1,1,0) + datetime.timedelta(seconds=seconds)
+            date = datetime.datetime(year,1,1,0) + \
+                datetime.timedelta(seconds=seconds)
             
             coords['HA'] = arr[0]
             coords['RA'] = arr[1]
@@ -155,6 +177,7 @@ class Telescope:
             coords['date'] = date
         return coords
     
+#-------------------------------------------------------------------------------
     def read_tcs_status(self):
         response = self.send("#26;")
 
@@ -233,30 +256,57 @@ class Telescope:
 
         return status
             
-    # turns on the pointing model corrections
+#-------------------------------------------------------------------------------
     def apply_mount_corrections(self):
+        '''
+        turns on the pointing model corrections
+        '''        
         self.logger.info("Turning on mount corrections")
         self.send('#66,1;')
 
-    # turns off the pointing model corrections
+#-------------------------------------------------------------------------------
     def unapply_mount_corrections(self):
+        '''
+        turns off the pointing model corrections
+        '''
         self.logger.info("Turning off mount corrections")
         self.send('#66,0;')
-   
+
+#-------------------------------------------------------------------------------
+    def populate_header(self,hdr):
+        '''
+        Retrieve and set telescope information FITS headers 
+        (requires communication with TCS)
+        '''
+        
+        #hdr['SITELAT'] = (latitude,"Site Latitude (deg)")
+        #hdr['SITELONG'] = (longitude,"Site East Longitude (deg)")
+        #hdr['SITEALT'] = (elevation,"Site Altitude (m)")
+        #hdr['RA'] = (ra, "Solved RA (J2000 deg)")
+        #hdr['DEC'] = (dec,"Solved Dec (J2000 deg)")
+        #hdr['ALT'] = (alt,'Telescope altitude (deg)')
+        #hdr['AZ'] = (az,'Telescope azimuth (deg E of N)')
+        #hdr['AIRMASS'] = (airmass,"airmass (plane approximation)")
+        #hdr['HOURANG'] = (hourang,"Hour angle")
+        #hdr['PMODEL'] = ('',"Pointing Model File")
+        #hdr['FOCPOS'] = (focus,"Focus Position (microns)")
+        #hdr['ROTPOS'] = (rotpos,"Mechanical rotator position (degrees)")
+        #hdr['PARANG'] = (parang,"Parallactic Angle (degrees)")
+        #hdr['SKYPA' ] = (skypa,"Position angle on the sky (degrees E of N)")
+
+        #hdr['MOONRA'] = (moonra, "Moon RA (J2000 deg)")
+        #hdr['MOONDEC'] =  (moondec, "Moon Dec (J2000 deg)")
+        #hdr['MOONPHAS'] = (moonphase, "Moon Phase (Fraction)")
+        #hdr['MOONDIST'] = (moonsep, "Distance between pointing and moon (deg)")
+        
+        pass        
+
+################################################################################
 if __name__ == '__main__':
-
-    if socket.gethostname() == 'tres-guider':
-        base_directory = '/home/tres/tres-guider/'
-    elif socket.gethostname() == 'Jason-THINK':
-        base_directory = 'C:/tres-guider/'
-    elif socket.gethostname() == 'flwo60':
-        base_directory = '/home/observer/tres-guider/'
-    else:
-        print('unsupported system')
-        sys.exit()
-
+    base_directory = './'
+    
     config_file = 'telescope.ini'
-    telescope = Telescope(base_directory, config_file)
+    telescope = telescope(base_directory, config_file)
 
     t0 = datetime.datetime.utcnow()
     status = telescope.read_tcs_status()
@@ -312,7 +362,8 @@ if __name__ == '__main__':
     print(coords2)
 
     # if status queries fail, reboot TCSGalil, then reinitialize telescope
-    # sending rapid fire commands seems to tank server (no more than 1 per second)
+    # sending rapid fire commands seems to tank server (no more than 1 per
+    # second)
     
     ipdb.set_trace()
 
