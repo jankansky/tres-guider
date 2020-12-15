@@ -18,6 +18,7 @@ from scipy.ndimage.filters import gaussian_filter
 import utils
 
 plt.ion()
+plt.switch_backend('agg')
 
 ################################################################################
 class DynamicPlot():
@@ -60,11 +61,12 @@ class DynamicPlot():
         self.figure.canvas.flush_events()
 
 ################################################################################
-class SimulatedGuiderCam():
+class SimulatedGuiderCam(threading.Thread):
     def __init__(self,base_directory,config_file,new_image_callback,
                  logger=None):
         """Initialize the Simulated camera with default configuration"""
 
+        threading.Thread.__init__(self)
         # set up the log file
         if logger == None:
             self.logger = utils.setup_logger(base_directory + '/log/',
@@ -103,7 +105,7 @@ class SimulatedGuiderCam():
 
         self.set_roi(self.x1,self.y1,self.x2,self.y2)
         self.logger.info("Setting frame rate to 10Hz")
-        self.set_frame_period(0.1)
+        self.set_frame_period(1.0)
         self.set_gain(1.0)
         self.logger.info("Setting exposure time to max for 10Hz framerate")
         self.set_exposure_time(0.1)
@@ -465,11 +467,11 @@ class SimulatedGuiderCam():
         
             
 #-------------------------------------------------------------------------------
-    def start_framing(self):
+    def run(self):
         '''Start simulated camera readout of frames cv, and deliver to 
         guider callback function
         '''
-
+        print("Staring camera framing")
         self.frame_counter = 0
 
         self.ticker = threading.Event()
@@ -478,7 +480,7 @@ class SimulatedGuiderCam():
             if self.framing:
                 self.tick()
             else:
-                pass
+                return
 
 #-------------------------------------------------------------------------------
     def stop_framing(self):

@@ -9,6 +9,8 @@ import aioredis
 from collections import deque
 import datetime
 import struct
+import redis
+import json
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -24,6 +26,25 @@ from quamash import QEventLoop, QThreadExecutor
 
 
 from tres_guider_control_ui import Ui_Dialog
+
+################################################################################
+class EventSender():
+    '''Send guider events to Redis for GUI usage'''
+    
+    def __init__(self,config):
+        self.server_host = config['REDIS_SERVER']
+        self.server_port = config['REDIS_PORT']
+        self.redis = redis.Redis(host=self.server_host,
+                                 port=self.server_port)
+
+    def send(self,command_dict):
+        '''
+        Pass in a dict of key value pairs to set in underlying code
+        '''
+        command_json_struct = json.dumps(command_dict)
+        res = self.redis.publish('guider_commands',command_json_struct)
+        return(res)
+
 
 ################################################################################
 class TresGUI(QWidget):
@@ -110,6 +131,9 @@ class TresGUI(QWidget):
                                self.config['REDIS_SERVER'],
                                self.config['REDIS_PORT'],
                                'guider_data'))
+
+        self.command_sender = EventSender(self.config)
+#        self.state_receiver = EventReceiver()
 
 #-------------------------------------------------------------------------------
 #    async def master(self):
@@ -348,8 +372,13 @@ class TresGUI(QWidget):
         pass
 
 #------------------------------------------------------------------------------#
-    def on_change_loop(self):
-        pass
+    def on_change_loop(self,checked):
+        if checked:
+            res = self.command_sender.send({'loop_state':1})
+            print("Closing loops")
+        else:
+            res = self.command_sender.send({'loop_state':0})
+            print("Opening loops")
 
 #------------------------------------------------------------------------------#    
     def on_bucketsize(self):

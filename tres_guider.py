@@ -6,6 +6,8 @@ import os
 import math
 import logging
 import redis
+import asyncio
+import aioredis
 import json
 import struct
 from configobj import ConfigObj
@@ -40,27 +42,54 @@ class TelemetrySender():
     def send(self,key,data):
         self.redis.publish(key,data)
         
-
 ################################################################################
 class EventSender():
     '''Send guider events to Redis for GUI usage'''
     
     def __init__(self,config):
-        self.redis = redis.StrictRedis(host=config['REDIS_SERVER'],
-                                       port=config['REDIS_PORT'])
-        self.pub_tracking_data = self.redis.pubsub()
+        self.server_host = config['REDIS_SERVER']
+        self.server_port = config['REDIS_PORT']
+        self.redis = redis.Redis(host=self.server_host,
+                                 port=self.server_port)
 
-    def send(self):
-        pass
+    def send(self,command_dict):
+        '''
+        Pass in a dict of key value pairs to set in underlying code
+        '''
+        command_json_struct = json.dumps(command_dict)
+#        res = self.redis.publish('guider_state',command_json_struct)
+        print("Sent event")
+        print(command_dict)
+        return(res)
         
 ################################################################################
 class EventReceiver():
     '''Receive gui events from Redis to modify guider operation'''    
     def __init__(self,config,callback):
+        self.config = config
         self.redis = redis.StrictRedis(host=config['REDIS_SERVER'],
                                        port=config['REDIS_PORT'])
         self.pub_tracking_data = self.redis.pubsub()
-        self.event_callback = callback
+        self.command_callback = callback
+        
+        self.receive_task = asyncio.ensure_future(
+            self.receive_telem(self.command_callback,
+                               self.config['REDIS_SERVER'],
+                               self.config['REDIS_PORT'],
+                               'guider_commands'))
+    @staticmethod
+    async def receive_telem(callback,server,port,data_name):
+        redis_sub = await aioredis.create_redis('redis://'+server+':'+port)
+        res = await redis_sub.subscribe(data_name)
+        sub_channel = res[0]        
+        
+        receive_counter = 0        
+        while (await sub_channel.wait_message()):
+            msg = await sub_channel.get_json()
+            callback(msg)
+            receive_counter += 1
+
+        
 
 ################################################################################
 class SimulatedTelescope():
@@ -227,6 +256,9 @@ class GuidingSystem():
         # Default to no detected stars, and no offsets
         self.stars = []
         self.offset = (0.0,0.0)
+
+        self.command_tree = {'loop_state':self.set_loop_state,
+                             'framing':self.set_framing_state}
         
         # Start in open loop
         self.framing = True
@@ -259,8 +291,8 @@ class GuidingSystem():
         GUI interactions'''
         
         self.telem_out = TelemetrySender(config)
-        self.events_out = EventSender(config)
-        self.events_in = EventReceiver(config,self.event_callback)
+        self.event_sender = EventSender(config)
+        self.event_receiver = EventReceiver(config,self.command_callback)
 
 #-------------------------------------------------------------------------------
     def init_camera(self,config):
@@ -833,12 +865,39 @@ class GuidingSystem():
                 cv2.imshow(self.display_name,frame_uint8_scaled)
 
 #-------------------------------------------------------------------------------
-    def event_callback(self,event):
+    def set_loop_state(self,param):
+        if param == 0:
+            self.guide_status = 'Open'
+            self.event_sender.send({'loop_state',0})
+            print('Opened loops')            
+        elif param == 1:
+            self.guide_status = 'Closed'
+            self.event_sender.send({'loop_state',1})
+            print('Closed loops')
+
+#-------------------------------------------------------------------------------
+    def set_framing_state(self,param):
+        if param == 0:
+            self.framing = False
+            self.cam.stop_framing()
+            print('Stopping camera framing')            
+        elif param == 1:
+            self.framing = True
+            print('Starting camera framing')
+            
+#-------------------------------------------------------------------------------
+    def command_callback(self,command_dict):
         '''
         This is where events from the GUI arrive, and we act on them.
         '''
-        
-        pass
+        print("Received guider command dict:")
+        print(command_dict)
+        print("Dispatching")
+        for command in command_dict:
+            callback = self.command_tree[command]
+            print(callback)
+#            callback(command_dict[command])
+        print("Done with command processing")
 
 #-------------------------------------------------------------------------------
     def perform_guiding(self,image,camera_xdim,camera_ydim,x1,x2,y1,y2):
@@ -988,7 +1047,8 @@ class GuidingSystem():
             
             cv2.setMouseCallback(self.display_name,self.mouse_event,self)
         
-        self.cam.start_framing()
+        self.cam.start()
+        print("Camera framing started")
 
 #-------------------------------------------------------------------------------
     def stop(self):
@@ -1004,5 +1064,11 @@ if __name__ == "__main__":
                            tiptilt_type='simulated',
                            calstage_type='simulated')
     guider.start()
+    loop = asyncio.get_event_loop()
+    try:
+        loop.run_forever()
+    finally:
+        loop.close()
+    print("TRES Guider stopping")
 
     
