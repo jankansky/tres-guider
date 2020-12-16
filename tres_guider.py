@@ -34,11 +34,13 @@ import cv2_image_processor as image_processor
 class TelemetrySender():
     '''Send guider images and derived telemetry to redis for GUI usage'''
     
+#-------------------------------------------------------------------------------
     def __init__(self,config):
         self.redis = redis.StrictRedis(host=config['REDIS_SERVER'],
                                        port=config['REDIS_PORT'])
 #        self.pub_tracking_data = self.redis.pubsub()
 
+#-------------------------------------------------------------------------------
     def send(self,key,data):
         self.redis.publish(key,data)
         
@@ -46,21 +48,24 @@ class TelemetrySender():
 class EventSender():
     '''Send guider events to Redis for GUI usage'''
     
+#-------------------------------------------------------------------------------
     def __init__(self,config):
         self.server_host = config['REDIS_SERVER']
         self.server_port = config['REDIS_PORT']
         self.redis = redis.Redis(host=self.server_host,
                                  port=self.server_port)
-
+        self.command_counter = 0
+        
+#-------------------------------------------------------------------------------
     def send(self,command_dict):
         '''
         Pass in a dict of key value pairs to set in underlying code
         '''
         command_json_struct = json.dumps(command_dict)
-#        res = self.redis.publish('guider_state',command_json_struct)
-        print("Sent event")
-        print(command_dict)
-        return(res)
+        res = self.redis.publish('guider_state',command_json_struct)
+        print("Sent event %i" % (self.command_counter,))
+        self.command_counter += 1
+        return(0)
         
 ################################################################################
 class EventReceiver():
@@ -77,6 +82,8 @@ class EventReceiver():
                                self.config['REDIS_SERVER'],
                                self.config['REDIS_PORT'],
                                'guider_commands'))
+        
+#-------------------------------------------------------------------------------
     @staticmethod
     async def receive_telem(callback,server,port,data_name):
         redis_sub = await aioredis.create_redis('redis://'+server+':'+port)
@@ -868,13 +875,14 @@ class GuidingSystem():
     def set_loop_state(self,param):
         if param == 0:
             self.guide_status = 'Open'
-            self.event_sender.send({'loop_state',0})
+            res = self.event_sender.send({'loop_state':0})
             print('Opened loops')            
         elif param == 1:
             self.guide_status = 'Closed'
-            self.event_sender.send({'loop_state',1})
+            res = self.event_sender.send({'loop_state':1})
             print('Closed loops')
-
+        return(0)
+            
 #-------------------------------------------------------------------------------
     def set_framing_state(self,param):
         if param == 0:
@@ -884,19 +892,15 @@ class GuidingSystem():
         elif param == 1:
             self.framing = True
             print('Starting camera framing')
-            
+        return(0)
+    
 #-------------------------------------------------------------------------------
     def command_callback(self,command_dict):
         '''
         This is where events from the GUI arrive, and we act on them.
         '''
-        print("Received guider command dict:")
-        print(command_dict)
-        print("Dispatching")
         for command in command_dict:
-            callback = self.command_tree[command]
-            print(callback)
-#            callback(command_dict[command])
+            res = self.command_tree[command](command_dict[command])
         print("Done with command processing")
 
 #-------------------------------------------------------------------------------

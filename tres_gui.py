@@ -36,6 +36,7 @@ class EventSender():
         self.server_port = config['REDIS_PORT']
         self.redis = redis.Redis(host=self.server_host,
                                  port=self.server_port)
+        self.command_counter = 0
 
     def send(self,command_dict):
         '''
@@ -43,6 +44,8 @@ class EventSender():
         '''
         command_json_struct = json.dumps(command_dict)
         res = self.redis.publish('guider_commands',command_json_struct)
+        self.command_counter += 1
+        print("Sent command %i" % (self.command_counter,))
         return(res)
 
 
@@ -126,14 +129,22 @@ class TresGUI(QWidget):
         self.region_ycen = self.roi_ydim/2
         self.region_radius = 20
 
+        self.event_tree = {'loop_state':self.on_loop_changed,
+                             'framing':self.on_framing_changed}
+        
         self.receive_task = asyncio.ensure_future(
             self.receive_telem(self.on_guider_data,
                                self.config['REDIS_SERVER'],
                                self.config['REDIS_PORT'],
                                'guider_data'))
 
+        self.receive_event_task = asyncio.ensure_future(
+            self.receive_events(self.on_events,
+                               self.config['REDIS_SERVER'],
+                               self.config['REDIS_PORT'],
+                               'guider_state'))
+        
         self.command_sender = EventSender(self.config)
-#        self.state_receiver = EventReceiver()
 
 #-------------------------------------------------------------------------------
 #    async def master(self):
@@ -166,7 +177,19 @@ class TresGUI(QWidget):
             callback(msg)
             receive_counter += 1
             
+    @staticmethod
+    async def receive_events(callback,server,port,data_name):
+        redis_sub = await aioredis.create_redis('redis://'+server+':'+port)
+        res = await redis_sub.subscribe(data_name)
+        sub_channel = res[0]        
+        
+        receive_counter = 0        
+        while (await sub_channel.wait_message()):
+            msg = await sub_channel.get_json()
+            callback(msg)
+            receive_counter += 1
 
+            
 
 #-------------------------------------------------------------------------------
     def replot_counts(self):
@@ -334,65 +357,87 @@ class TresGUI(QWidget):
 #        newtime = dates.date2num(tstamp)
 #        print("Got new image")
 #        self.ds9.set_np2arr(image)
-                        
-#------------------------------------------------------------------------------#            
+
+#------------------------------------------------------------------------------
+    def on_events(self,new_events_dict):
+        print("Got events")
+        print(new_events_dict)              
+        for new_event in new_events_dict:
+            print(new_event)
+            print(new_events_dict[new_event])
+            res = self.event_tree[new_event](new_events_dict[new_event])
+        print("Done processing events");
+
+
+#-------------------------------------------------------------------------------
     def on_dx(self,message):
         print(message)
 
-#------------------------------------------------------------------------------#        
+#-------------------------------------------------------------------------------
     def on_dy(self,message):
         print(message)
 
-#------------------------------------------------------------------------------#
+#-------------------------------------------------------------------------------
     def on_gdr_onoff(self):
         pass
     
-#------------------------------------------------------------------------------#
+#-------------------------------------------------------------------------------
     def on_set_offsets(self):
         pass
 
-#------------------------------------------------------------------------------#    
+#-------------------------------------------------------------------------------
     def on_enable(self):
         pass
 
-#------------------------------------------------------------------------------#    
+#-------------------------------------------------------------------------------
     def on_standby(self):
         pass
 
-#------------------------------------------------------------------------------#    
+#-------------------------------------------------------------------------------
     def on_details(self):
         pass
 
-#------------------------------------------------------------------------------#    
+#-------------------------------------------------------------------------------
     def on_config(self):
         pass
 
-#------------------------------------------------------------------------------#    
+#-------------------------------------------------------------------------------
     def on_azelxy(self):
         pass
 
-#------------------------------------------------------------------------------#
+#-------------------------------------------------------------------------------
     def on_change_loop(self,checked):
-        if checked:
+        if self.ui.loopButton.text() == 'Open':
             res = self.command_sender.send({'loop_state':1})
             print("Closing loops")
-        else:
+        elif self.ui.loopButton.text() == 'Closed':
             res = self.command_sender.send({'loop_state':0})
             print("Opening loops")
 
-#------------------------------------------------------------------------------#    
+#-------------------------------------------------------------------------------
     def on_bucketsize(self):
         pass
     
-#------------------------------------------------------------------------------#    
-    @pyqtSlot(str, str)
-    def on_loopchanged(self, tclname, sval):
-        self.lf.lprint('on_loopchanged: tclname, sval = ', tclname, sval)
-        if sval == '1':
-            self.loopButton.toggled.emit(True)
-        else:
-            self.lf.lprint('loop-button goes gray')
-            self.loopButton.toggled.emit(False)
+#-------------------------------------------------------------------------------
+    def on_loop_changed(self,sval):
+        if sval == 1:
+            self.ui.loopButton.setText('Closed')
+#            self.loopButton.toggled.emit(True)
+        elif sval == 0:
+            self.ui.loopButton.setText('Open')            
+#            self.loopButton.toggled.emit(False)
+
+#-------------------------------------------------------------------------------
+    def on_framing_changed(self,sval):
+        if sval == True:
+            pass
+#            self.loopButton.setText('Closed')
+#            self.loopButton.toggled.emit(True)
+        elif sval == False:
+            pass
+#            self.loopButton.setText('Open')            
+#            self.loopButton.toggled.emit(False)
+
 
     
 ################################################################################
