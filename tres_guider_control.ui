@@ -527,7 +527,7 @@
       <item>
        <widget class="QPushButton" name="loopButton">
         <property name="text">
-         <string>closed</string>
+         <string>Closed</string>
         </property>
         <property name="autoDefault">
          <bool>false</bool>

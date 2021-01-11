@@ -407,6 +407,7 @@ class TresGUI(QWidget):
 
 #-------------------------------------------------------------------------------
     def on_change_loop(self,checked):
+        print("In on_change_loop")
         if self.ui.loopButton.text() == 'Open':
             res = self.command_sender.send({'loop_state':1})
             print("Closing loops")
@@ -420,10 +421,10 @@ class TresGUI(QWidget):
     
 #-------------------------------------------------------------------------------
     def on_loop_changed(self,sval):
-        if sval == 1:
+        if sval == True:
             self.ui.loopButton.setText('Closed')
 #            self.loopButton.toggled.emit(True)
-        elif sval == 0:
+        elif sval == False:
             self.ui.loopButton.setText('Open')            
 #            self.loopButton.toggled.emit(False)
 
