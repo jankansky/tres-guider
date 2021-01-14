@@ -497,7 +497,7 @@
       <item>
        <widget class="QPushButton" name="enableButton">
         <property name="text">
-         <string>Run</string>
+         <string>Running</string>
         </property>
         <property name="autoDefault">
          <bool>false</bool>
@@ -564,8 +564,8 @@
    <slot>on_gdr_onoff(bool)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>276</x>
-     <y>36</y>
+     <x>431</x>
+     <y>101</y>
     </hint>
     <hint type="destinationlabel">
      <x>812</x>
@@ -580,8 +580,8 @@
    <slot>on_set_offsets()</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>201</x>
-     <y>557</y>
+     <x>1143</x>
+     <y>466</y>
     </hint>
     <hint type="destinationlabel">
      <x>786</x>
@@ -591,13 +591,13 @@
   </connection>
   <connection>
    <sender>enableButton</sender>
-   <signal>toggled(bool)</signal>
+   <signal>clicked()</signal>
    <receiver>Dialog</receiver>
-   <slot>on_enable(bool)</slot>
+   <slot>on_change_framing()</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>697</x>
-     <y>811</y>
+     <x>751</x>
+     <y>772</y>
     </hint>
     <hint type="destinationlabel">
      <x>947</x>
@@ -612,8 +612,8 @@
    <slot>on_standby(bool)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>361</x>
-     <y>36</y>
+     <x>522</x>
+     <y>101</y>
     </hint>
     <hint type="destinationlabel">
      <x>611</x>
@@ -628,8 +628,8 @@
    <slot>on_details()</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>1020</x>
-     <y>36</y>
+     <x>1154</x>
+     <y>101</y>
     </hint>
     <hint type="destinationlabel">
      <x>947</x>
@@ -644,8 +644,8 @@
    <slot>on_config()</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>933</x>
-     <y>36</y>
+     <x>1063</x>
+     <y>101</y>
     </hint>
     <hint type="destinationlabel">
      <x>946</x>
@@ -660,8 +660,8 @@
    <slot>on_azelxy(bool)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>714</x>
-     <y>34</y>
+     <x>605</x>
+     <y>99</y>
     </hint>
     <hint type="destinationlabel">
      <x>1</x>
@@ -676,8 +676,8 @@
    <slot>on_change_loop(bool)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>963</x>
-     <y>804</y>
+     <x>1146</x>
+     <y>772</y>
     </hint>
     <hint type="destinationlabel">
      <x>1027</x>
@@ -692,8 +692,8 @@
    <slot>on_bucketsize()</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>329</x>
-     <y>624</y>
+     <x>1144</x>
+     <y>540</y>
     </hint>
     <hint type="destinationlabel">
      <x>4</x>
@@ -724,5 +724,6 @@
   <slot>on_longslit(bool)</slot>
   <slot>on_azelxy(bool)</slot>
   <slot>on_bucketsize()</slot>
+  <slot>on_change_framing()</slot>
  </slots>
 </ui>

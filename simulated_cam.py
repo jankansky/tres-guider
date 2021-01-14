@@ -10,55 +10,11 @@ import math
 import datetime
 
 import numpy as np
-from matplotlib import pyplot as plt
 import select
 import time
 from scipy.ndimage.filters import gaussian_filter
 
 import utils
-
-plt.ion()
-plt.switch_backend('agg')
-
-################################################################################
-class DynamicPlot():
-    #Suppose we know the x range
-    min_x = 0
-    max_x = 2000
-    min_y = 0
-    max_y = 255
-
-#-------------------------------------------------------------------------------
-    def on_launch(self):
-        #Set up plot
-        self.figure, self.ax = plt.subplots()
-        self.lines, = self.ax.plot([],[], marker=None,linestyle="-")
-        #Autoscale on unknown axis and known lims on the other
-        self.ax.set_xlim(self.min_x, self.max_x)
-        self.ax.set_ylim(self.min_y, self.max_y)
-        #Other stuff
-        self.ax.grid()
-        plt.xlabel("Pixel")
-        plt.ylabel("Counts")
-        plt.title("Simulated Cam Horizontal Graph")
-        ...
-
-#-------------------------------------------------------------------------------
-    def on_running(self, xdata, ydata):
-        #Update data (with the new _and_ the old points)
-        self.min_x = np.min(xdata)
-        self.max_x = np.max(xdata)
-        self.max_y = np.max(ydata)
-        self.ax.set_xlim(self.min_x, self.max_x)
-        self.ax.set_ylim(self.min_y, self.max_y+10)
-        self.lines.set_xdata(xdata)
-        self.lines.set_ydata(ydata)
-        #Need both of these in order to rescale
-        self.ax.relim()
-        self.ax.autoscale_view()
-        #We need to draw *and* flush
-        self.figure.canvas.draw()
-        self.figure.canvas.flush_events()
 
 ################################################################################
 class SimulatedGuiderCam(threading.Thread):
@@ -82,7 +38,7 @@ class SimulatedGuiderCam(threading.Thread):
                           + config_file + ')')
             sys.exit()
 
-            
+        self.terminate = False  # Should we exit this thread
         self.camera_xdim_pix = int(config['SIMULATED_CAM_XDIM'])
         self.camera_ydim_pix = int(config['SIMULATED_CAM_YDIM'])
 
@@ -100,6 +56,8 @@ class SimulatedGuiderCam(threading.Thread):
         self.x2 = self.camera_xdim_pix
         self.y1 = 0
         self.y2 = self.camera_ydim_pix
+
+
         self.xbin = 1
         self.ybin = 1
 
@@ -109,8 +67,6 @@ class SimulatedGuiderCam(threading.Thread):
         self.set_gain(1.0)
         self.logger.info("Setting exposure time to max for 10Hz framerate")
         self.set_exposure_time(0.1)
-        self.horiz_graph = DynamicPlot()
-        self.horiz_graph.on_launch()
         self.xdata = []
         self.ydata = []
 
@@ -122,9 +78,9 @@ class SimulatedGuiderCam(threading.Thread):
         self.arcsec_per_pix = self.arcsec_per_um_at_ccd * self.pixel_size_um
         
 
-
-        self.star_xpositions = [1000,500,1000]
-        self.star_ypositions = [1000,500,500]
+        # Create three simulated stars
+        self.star_xpositions = [0.0,-30.0,0.0]   # arcsec from center
+        self.star_ypositions = [0.0,-30.0,-30.0] # arcsec from center
         self.star_fluxes = [1e6,0.5e6,1.5e6]
         self.star_fwhm = 1.0
         self.noise = 2.0
@@ -329,13 +285,13 @@ class SimulatedGuiderCam(threading.Thread):
         self.simulated_fsm_y_correction = y
     
 #-------------------------------------------------------------------------------
-    def simulate_star_image(self,x,y,flux,fwhm,background=300.0,noise=0.0,
+    def simulate_star_image(self,xpos,ypos,flux,fwhm,background=300.0,noise=0.0,
                             jitter=0.0):
         ''' 
         This creates a simple simulated image of a star field
         The idea is to be able to test guide performance without being on sky
-        x -- an array of X centroids of the stars (only integers tested!)
-        y -- an array of Y centroids of the stars (only integers tested!)
+        xpos -- an array of X centroids of the stars (arcsec from cam center)
+        ypos -- an array of Y centroids of the stars (arcsec from cam center)
         flux -- an array of fluxes of the stars (electrons)
         fwhm -- the fwhm of the stars (arcsec)
         background -- the sky background of the image
@@ -373,16 +329,18 @@ class SimulatedGuiderCam(threading.Thread):
 
         
         # add each of the stars
-        for ii in range(len(x)):
+        for ii in range(len(xpos)):
 
-            xii = x[ii] - self.x1 + 1 + \
-                int(np.round((self.x_jitter_offset +
-                              self.simulated_fsm_x_correction) /
-                             self.arcsec_per_pix))
-            yii = y[ii] - self.y1 + 1 + \
-                int(np.round((self.y_jitter_offset +
-                              self.simulated_fsm_y_correction) /
-                             self.arcsec_per_pix))
+            xii = int(np.round(xpos[ii]/self.arcsec_per_pix +
+                               self.camera_xcenter_pix - self.x1 + 1 + \
+                               (self.x_jitter_offset +
+                                self.simulated_fsm_x_correction) /
+                               self.arcsec_per_pix))
+            yii = int(np.round(ypos[ii]/self.arcsec_per_pix +
+                               self.camera_ycenter_pix - self.y1 + 1 + \
+                               (self.y_jitter_offset +
+                                self.simulated_fsm_y_correction) /
+                               self.arcsec_per_pix))
             
             # make sure the stamp fits on the image (if not, truncate)
             if (xii >= boxsize):
@@ -461,8 +419,6 @@ class SimulatedGuiderCam(threading.Thread):
                 
         self.ydata = np.sum(roi,axis=0)/(self.y2-self.y1)
 
-        self.horiz_graph.on_running(self.xdata,self.ydata)
-
         self.frame_counter += 1;
         
             
@@ -471,7 +427,7 @@ class SimulatedGuiderCam(threading.Thread):
         '''Start simulated camera readout of frames cv, and deliver to 
         guider callback function
         '''
-        print("Staring camera framing")
+        self.logger.info("Staring simulated camera thread and framing")
         self.frame_counter = 0
 
         self.ticker = threading.Event()
@@ -479,13 +435,27 @@ class SimulatedGuiderCam(threading.Thread):
         while not self.ticker.wait(self.frame_period):
             if self.framing:
                 self.tick()
-            else:
+            if self.terminate:
                 return
 
 #-------------------------------------------------------------------------------
+    def start_framing(self):
+        '''Enable camera framing'''
+        self.logger.info("Starting simulated camera framing")
+        self.framing = True
+
+            
+#-------------------------------------------------------------------------------
     def stop_framing(self):
         '''Cleanup operations'''
+        self.logger.info("Stopping simulated camera framing")
         self.framing = False
+
+#-------------------------------------------------------------------------------
+    def exit(self):
+        self.logger.info("Simulated camera thread terminating")
+        self.framing = False
+        self.terminate = True
 
 ################################################################################
 if __name__ == "__main__":

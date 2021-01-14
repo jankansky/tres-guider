@@ -130,7 +130,7 @@ class TresGUI(QWidget):
         self.region_radius = 20
 
         self.event_tree = {'loop_state':self.on_loop_changed,
-                             'framing':self.on_framing_changed}
+                           'framing':self.on_framing_changed}
         
         self.receive_task = asyncio.ensure_future(
             self.receive_telem(self.on_guider_data,
@@ -386,10 +386,6 @@ class TresGUI(QWidget):
         pass
 
 #-------------------------------------------------------------------------------
-    def on_enable(self):
-        pass
-
-#-------------------------------------------------------------------------------
     def on_standby(self):
         pass
 
@@ -404,7 +400,11 @@ class TresGUI(QWidget):
 #-------------------------------------------------------------------------------
     def on_azelxy(self):
         pass
-
+    
+#-------------------------------------------------------------------------------
+    def on_bucketsize(self):
+        pass
+    
 #-------------------------------------------------------------------------------
     def on_change_loop(self,checked):
         print("In on_change_loop")
@@ -416,11 +416,8 @@ class TresGUI(QWidget):
             print("Opening loops")
 
 #-------------------------------------------------------------------------------
-    def on_bucketsize(self):
-        pass
-    
-#-------------------------------------------------------------------------------
     def on_loop_changed(self,sval):
+        print("Got message that loop state changed")
         if sval == True:
             self.ui.loopButton.setText('Closed')
 #            self.loopButton.toggled.emit(True)
@@ -429,17 +426,22 @@ class TresGUI(QWidget):
 #            self.loopButton.toggled.emit(False)
 
 #-------------------------------------------------------------------------------
+    def on_change_framing(self,checked):
+        print("In on_change_framing")
+        if self.ui.enableButton.text() == 'Running':
+            res = self.command_sender.send({'framing':0})
+            print("Stopping camera framing")
+        elif self.ui.enableButton.text() == 'Stopped':
+            res = self.command_sender.send({'framing':1})
+            print("Starting camera framing")
+
+#-------------------------------------------------------------------------------
     def on_framing_changed(self,sval):
+        print("Got message that framing state changed")
         if sval == True:
-            pass
-#            self.loopButton.setText('Closed')
-#            self.loopButton.toggled.emit(True)
+            self.ui.enableButton.setText('Running')
         elif sval == False:
-            pass
-#            self.loopButton.setText('Open')            
-#            self.loopButton.toggled.emit(False)
-
-
+            self.ui.enableButton.setText('Stopped')
     
 ################################################################################
 if __name__ == "__main__":
