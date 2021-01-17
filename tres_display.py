@@ -415,11 +415,12 @@ class TresDisplay():
     def refresh_image(self):
         self.rebin_factor = max(self.roi_x2-self.roi_x1,
                                 self.roi_y2-self.roi_y1) / self.screen_res
-        self.frame_scaled = cv2.resize(self.image,
-                                       (int(np.round((self.roi_y2-self.roi_y1)/
-                                                     self.rebin_factor)),
-                                        int(np.round((self.roi_x2-self.roi_x1)/
-                                                     self.rebin_factor))),
+        width = int(np.round((self.roi_x2-self.roi_x1)/
+                             self.rebin_factor))
+        height = int(np.round((self.roi_y2-self.roi_y1)/
+                             self.rebin_factor))
+        dims = (width,height)
+        self.frame_scaled = cv2.resize(self.image,dims,
                                        interpolation=cv2.INTER_NEAREST)
 
         frame_scaled_min = np.min(self.frame_scaled)

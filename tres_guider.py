@@ -19,6 +19,7 @@ import cv2
 import dfm_telescope as telescope
 
 import simulated_cam
+import asi_cam
 #import adimec_q4a180
 #import andor_zyla
 
@@ -265,33 +266,20 @@ class GuidingSystem():
         self.offset = (0.0,0.0)
 
         self.command_tree = {'loop_state':self.set_loop_state,
-                             'framing':self.set_framing_state}
+                             'framing':self.set_framing_state,
+                             'toggle_framing':self.toggle_framing_state,
+                             'roi':self.set_roi}
         
         # Start in open loop
         self.framing = True
         self.guide_status = 'Open'
         self.save_images = False
 
-        # Temporarily including display functionaity in this code.  Later this
-        # will be split off into the decoupled GUI through Redis.
-        self.display = True
-
         # Send data via redis telem channel?
         self.telemetry = True
 
-        # Controls image window rebin factor.  Replace with detected
-        self.screen_res = 500 
-        self.rebin_factor = 1.0
-
-        # Is the user holding mouse button to adjust color map?
-        self.adjusting_image = False 
-
-        # Current colormap tweaks
-        self.contrast = 0.0
-        self.brightness = 0.0
+        self.counter = 0
         
-        self.display_name = "TRES Guider Camera"
-
 #-------------------------------------------------------------------------------
     def init_ipc(self,config):
         '''Establish inter-process communicaiton mechanisms for telemetry and
@@ -331,12 +319,18 @@ class GuidingSystem():
             self.cam = andor_zyla.ZylaGuiderCam(base_directory,'andor_cam.ini',
                                                 new_image_callback=\
                                                 self.new_image_callback)
+        elif self.cam_type == 'asi':
+            self.cam = asi_cam.ASIGuiderCam(base_directory,'asi_cam.ini',
+                                            new_image_callback=\
+                                            self.new_image_callback)
         else:
             self.logger.error("Unknown cam type")
             exit()
         
         self.arcsec_per_pixel = self.arcsec_per_um_guider_ccd * \
             self.cam.get_pixel_size()
+
+        self.pixel_size_um = self.cam.get_pixel_size();
 
         # Assume square ROI when tracking
         self.roi_size_pixels = (int(np.round(float(config['ROI_SIZE_ARCSEC']) /
@@ -457,299 +451,6 @@ class GuidingSystem():
         return(hdr)
 
 #-------------------------------------------------------------------------------
-    def mouse_event(self,event,x,y,flags,param):
-        '''
-        Temorarily including display functionality here via CV2 library.
-        When user clicks on the screen, the left button is used to set
-        an ROI around the star that was clicked.  The right button is used to
-        revert back to a full frame readout
-        '''
-        if (event == cv2.EVENT_MBUTTONDOWN):
-            self.logger.info(("User clicked at pixel %i %i" %
-                              (x*self.rebin_factor,y*self.rebin_factor)))
-
-            click_x = int(np.round(self.x1 + float(x) * self.rebin_factor))
-            click_y = int(np.round(self.y1 + float(y) * self.rebin_factor))
-            
-            if (click_x > self.camera_xdim-self.roi_size_pixels/2):
-                click_x = self.camera_xdim-self.roi_size_pixels/2
-
-            if (click_x < self.roi_size_pixels/2):
-                click_x = self.roi_size_pixels/2
-                
-                
-            if (click_y > self.camera_ydim-self.roi_size_pixels/2):
-                click_y = self.camera_ydim-self.roi_size_pixels/2
-                
-            if (click_y < self.roi_size_pixels/2):
-                click_y = self.roi_size_pixels/2
-
-                
-            click_x = int(np.round(click_x))
-            click_y = int(np.round(click_y))
-            
-            self.x1 = click_x - int(self.roi_size_pixels/2)
-            self.x2 = click_x + int(self.roi_size_pixels/2)
-            self.y1 = click_y - int(self.roi_size_pixels/2)
-            self.y2 = click_y + int(self.roi_size_pixels/2)
-            self.cam.set_roi(self.x1,self.y1,self.x2,self.y2)
-
-        if event == cv2.EVENT_RBUTTONDOWN:
-            self.x1 = 0
-            self.x2 = self.camera_xdim
-            self.y1 = 0
-            self.y2 = self.camera_ydim
-            self.cam.set_roi(self.x1,self.y1,self.x2,self.y2)
-            
-        if event == cv2.EVENT_LBUTTONDOWN:
-            self.adjusting_image = True
-            
-        if event == cv2.EVENT_LBUTTONUP:
-            self.adjusting_image = False
-
-        if self.adjusting_image:
-            if event == cv2.EVENT_MOUSEMOVE:
-                self.brightness = (128 * (x - self.screen_res/2) /
-                                   (self.screen_res/2))
-                self.contrast = (128 * (y - self.screen_res/2) /
-                                 (self.screen_res/2))
-                frame_uint8_scaled = self.adjust_brightness_contrast(
-                    self.frame_uint8,contrast=self.contrast,
-                    brightness=self.brightness)
-                frame_uint8_scaled = cv2.applyColorMap(frame_uint8_scaled,
-                                                       cv2.COLORMAP_JET)
-                self.annotate_image(frame_uint8_scaled,self.stars)
-                cv2.imshow(self.display_name,frame_uint8_scaled)                
-
-#-------------------------------------------------------------------------------
-    def cam_pix_to_display_pix(self,x,y):
-        '''
-        Temorarily including display functionality here via CV2 library.
-
-        The screen display is rescaled from the camera pixels.  To draw
-        items on the display, this converts from raw camera pixel coordinates
-        to display window coordinates.  The camera pixel coordinates are always
-        in terms of the the full frame indices, even if an ROI is active.'''
-
-        return((x - self.x1) / self.rebin_factor,
-               (y - self.y1) / self.rebin_factor)
-
-#-------------------------------------------------------------------------------
-    def draw_sci_fiber_bucket(self,img):
-        '''
-        Temorarily including display functionality here via CV2 library.
-
-        This draws a circle into the img passed in to denotes the science
-        fiber bucket.
-        '''
-
-        # Figure out how many camera pixels from the camera center to the
-        # fiber location
-        (sci_fiber_xcenter_pix,
-         sci_fiber_ycenter_pix) =  \
-             self.cam.um_from_center_to_pix(self.sci_fiber_x *
-                                            self.guider_magnification /
-                                            self.arcsec_per_um_guider_ccd,
-                                            self.sci_fiber_y  *
-                                            self.guider_magnification /
-                                            self.arcsec_per_um_guider_ccd)
-
-        # Convert from camera pixels to screen pixels. They are different due
-        # to display rebin factor
-        (sci_fiber_display_xcen_pix,
-         sci_fiber_display_ycen_pix) =  \
-             self.cam_pix_to_display_pix(sci_fiber_xcenter_pix,
-                                         sci_fiber_ycenter_pix)
-
-        sci_fiber_xwidth_cam_pix = \
-            self.cam.um_to_pix(self.sci_fiber_xwidth  *
-                               self.guider_magnification /
-                               self.arcsec_per_um_guider_ccd)        
-        sci_fiber_ywidth_cam_pix = \
-            self.cam.um_to_pix(self.sci_fiber_ywidth *
-                               self.guider_magnification/
-                               self.arcsec_per_um_guider_ccd)
-
-        sci_fiber_xwidth_display_pix = (sci_fiber_xwidth_cam_pix /
-                                        self.rebin_factor)
-        
-        sci_fiber_ywidth_display_pix = (sci_fiber_ywidth_cam_pix /
-                                        self.rebin_factor)
-
-        cv2.ellipse(img,(int(np.round(sci_fiber_display_xcen_pix)),
-                        int(np.round(sci_fiber_display_ycen_pix))),
-                    (int(np.round(sci_fiber_xwidth_display_pix)),
-                     int(np.round(sci_fiber_ywidth_display_pix))),
-                    0.0,0,360,
-                    (255,255,255),1)
-
-        sci_hole_xwidth_cam_pix = \
-            self.cam.um_to_pix(self.sci_hole_xwidth  *
-                               self.guider_magnification /
-                               self.arcsec_per_um_guider_ccd)
-        sci_hole_ywidth_cam_pix = \
-            self.cam.um_to_pix(self.sci_hole_ywidth  *
-                               self.guider_magnification /
-                               self.arcsec_per_um_guider_ccd)
-
-        sci_hole_xwidth_display_pix = (sci_hole_xwidth_cam_pix /
-                                        self.rebin_factor)
-        
-        sci_hole_ywidth_display_pix = (sci_hole_ywidth_cam_pix /
-                                        self.rebin_factor)
-
-        cv2.ellipse(img,(int(np.round(sci_fiber_display_xcen_pix)),
-                         int(np.round(sci_fiber_display_ycen_pix))),
-                    (int(np.round(sci_hole_xwidth_display_pix)),
-                     int(np.round(sci_hole_ywidth_display_pix))),
-                    0.0,0,360,
-                    (255,255,255),1)
-        
-#-------------------------------------------------------------------------------
-    def draw_sky_fiber_bucket(self,img):
-        '''
-        Temorarily including display functionality here via CV2 library.
-
-        This draws a circle into the img passed in to denotes the sky fiber
-        bucket.
-        '''
-
-        # Figure out how many camera pixels from the camera center to the
-        # fiber location
-        (sky_fiber_xcenter_pix,
-         sky_fiber_ycenter_pix) =  \
-             self.cam.um_from_center_to_pix(self.sky_fiber_x *
-                                            self.guider_magnification /
-                                            self.arcsec_per_um_guider_ccd,
-                                            self.sky_fiber_y *
-                                            self.guider_magnification /
-                                            self.arcsec_per_um_guider_ccd)
-
-        # Convert from camera pixels to screen pixels. They are different due
-        # to display rebin factor
-        (sky_fiber_display_xcen_pix,
-         sky_fiber_display_ycen_pix) =  \
-             self.cam_pix_to_display_pix(sky_fiber_xcenter_pix,
-                                         sky_fiber_ycenter_pix)
-
-        sky_fiber_xwidth_cam_pix = \
-            self.cam.um_to_pix(self.sky_fiber_xwidth  *
-                               self.guider_magnification/
-                               self.arcsec_per_um_guider_ccd)
-        sky_fiber_ywidth_cam_pix = \
-            self.cam.um_to_pix(self.sky_fiber_ywidth  *
-                               self.guider_magnification/
-                               self.arcsec_per_um_guider_ccd)
-
-        sky_fiber_xwidth_display_pix = (sky_fiber_xwidth_cam_pix /
-                                        self.rebin_factor)
-        
-        sky_fiber_ywidth_display_pix = (sky_fiber_ywidth_cam_pix /
-                                        self.rebin_factor)
-
-        cv2.ellipse(img,(int(np.round(sky_fiber_display_xcen_pix)),
-                        int(np.round(sky_fiber_display_ycen_pix))),
-                    (int(np.round(sky_fiber_xwidth_display_pix)),
-                     int(np.round(sky_fiber_ywidth_display_pix))),
-                    0.0,0,360,
-                    (255,0,255),1)
-
-        sky_hole_xwidth_cam_pix = \
-            self.cam.um_to_pix(self.sky_hole_xwidth  *
-                               self.guider_magnification /
-                               self.arcsec_per_um_guider_ccd)
-        sky_hole_ywidth_cam_pix = \
-            self.cam.um_to_pix(self.sky_hole_ywidth  *
-                               self.guider_magnification/
-                               self.arcsec_per_um_guider_ccd)
-
-        sky_hole_xwidth_display_pix = (sky_hole_xwidth_cam_pix /
-                                        self.rebin_factor)
-        
-        sky_hole_ywidth_display_pix = (sky_hole_ywidth_cam_pix /
-                                        self.rebin_factor)
-
-        cv2.ellipse(img,(int(np.round(sky_fiber_display_xcen_pix)),
-                        int(np.round(sky_fiber_display_ycen_pix))),
-                    (int(np.round(sky_hole_xwidth_display_pix)),
-                     int(np.round(sky_hole_ywidth_display_pix))),
-                    0.0,0,360,
-                    (200,0,200),1)
-
-        
-#-------------------------------------------------------------------------------
-    def draw_centroids(self,img,stars):
-        '''
-        Temorarily including display functionality here via CV2 library.
-
-        Draw a marker into the image passed in at each star location.
-        Currently star centroids are in camera pixels.  Change this to arcsec
-        eventually.
-        '''
-
-        if (len(stars) == 0):
-            return
-        
-        num_stars = stars.shape[0]
-        
-        for loop in range(num_stars):
-            (star_xcenter_pix,
-             star_ycenter_pix) = \
-                 self.cam_pix_to_display_pix(stars[loop,0] + self.camera_xdim/2,
-                                             stars[loop,1] + self.camera_ydim/2)
-            cv2.drawMarker(img,(int(np.round(star_xcenter_pix)),
-                                int(np.round(star_ycenter_pix))),(0,255,255),
-                           markerType=cv2.MARKER_CROSS, thickness=1)
-
-#-------------------------------------------------------------------------------
-    def annotate_image(self,img,stars):
-        '''
-        Temorarily including display functionality here via CV2 library.
-
-        Draw sci and sky fiber locations in frame
-        Draw centroid locations in frame
-        Draw platesolving locations in frame eventually
-        '''
-        
-        self.draw_sci_fiber_bucket(img)
-        self.draw_sky_fiber_bucket(img)
-        self.draw_centroids(img,stars)
-
-#-------------------------------------------------------------------------------
-    def adjust_brightness_contrast(self,input_img,brightness=0,contrast=0):
-        '''
-        Temorarily including display functionality here via CV2 library.
-
-        Adjust an image brightness and contrast prior for display purposes
-        inputs:
-        input_img: The image we are manipulating
-        brighness: 0 means unchanged.  
-        '''
-        
-        if (brightness != 0):
-            if (brightness > 0):
-                shadow = brightness
-                highlight = 255
-            else:
-                shadow = 0
-                highlight = 255 + brightness
-            alpha_b = (highlight - shadow) / 255
-            gamma_b = shadow
-        
-            buf = cv2.addWeighted(input_img,alpha_b,input_img,0,gamma_b)
-        else:
-            buf = input_img.copy()
-    
-        if (contrast != 0):
-            f = 131 * (contrast + 127) / (127 * (131 - contrast))
-            alpha_c = f
-            gamma_c = 127 * (1 - f)
-        
-            buf = cv2.addWeighted(buf,alpha_c,buf,0,gamma_c)
-
-        return(buf)
-
-#-------------------------------------------------------------------------------
     def save_image(self,image,overwrite=False):
         '''
         Populate a FITS header by probing objects and attach it to the image.
@@ -784,18 +485,22 @@ class GuidingSystem():
         return(save_image_thread)
 
 #-------------------------------------------------------------------------------
-    def new_image_callback(self,dateobs,camera_xdim,camera_ydim,camera_x1,
+    def new_image_callback(self,dateobs,camera_xdim_pix,camera_ydim_pix,camera_x1,
                            camera_y1,camera_x2,camera_y2,image):
         '''
         Process newimage and display if requested.  Pass in datetime of image
         acquisition, camera full x and y dimension in pixels, plus the current
         ROI in use, followed by the image
         '''
-        
+
+        print(self.counter)
+        self.counter += 1
         self.dateobs = dateobs 
         self.image = image
-        self.camera_xdim = camera_xdim
-        self.camera_ydim = camera_ydim
+        self.camera_xdim_pix = camera_xdim_pix
+        self.camera_ydim_pix = camera_ydim_pix
+        self.camera_xcenter_pix = (float(self.camera_xdim_pix)/2) - 0.5
+        self.camera_ycenter_pix = (float(self.camera_ydim_pix)/2) - 0.5
         self.x1 = camera_x1
         self.y1 = camera_y1
         self.x2 = camera_x2
@@ -808,7 +513,7 @@ class GuidingSystem():
             return
 
         # Analyze and act on the new image
-        self.perform_guiding(self.image,self.camera_xdim,self.camera_ydim,
+        self.perform_guiding(self.image,self.camera_xdim_pix,self.camera_ydim_pix,
                              self.x1,self.x2,self.y1,self.y2)
 
         if self.telemetry:
@@ -816,60 +521,6 @@ class GuidingSystem():
         
         if self.save_images:
             save_thread = self.save_image_in_thread()
-
-        # Temporarily including display functionality here
-        if self.display:
-            self.rebin_factor = max(self.x2-self.x1,
-                                    self.y2-self.y1) / self.screen_res
-            self.frame_scaled = cv2.resize(self.image,
-                                           (int(np.round((self.y2-self.y1)/
-                                                         self.rebin_factor)),
-                                            int(np.round((self.x2-self.x1)/
-                                                         self.rebin_factor))),
-                                           interpolation=cv2.INTER_NEAREST)
-
-            frame_scaled_min = np.min(self.frame_scaled)
-            frame_scaled_max = np.max(self.frame_scaled)
-            if frame_scaled_max < 20:
-                frame_scaled_max = 20
-            self.frame_uint8 = ((self.frame_scaled / frame_scaled_max) *
-                                255).astype(np.uint8)
-            frame_uint8_scaled = self.adjust_brightness_contrast(
-                self.frame_uint8,contrast=self.contrast,
-                brightness=self.brightness)
-        
-            frame_uint8_scaled = cv2.applyColorMap(frame_uint8_scaled,
-                                                   cv2.COLORMAP_JET)
-            self.annotate_image(frame_uint8_scaled,self.stars)            
-            cv2.imshow(self.display_name,frame_uint8_scaled)
-
-
-            # q to quit, spacebar to stop/start framing, r to reset colormap
-            k = cv2.waitKey(1)
-            if(k & 0xFF == ord('q')):
-                cv2.destroyAllWindows()
-                exit()
-            elif (k & 0xFF == ord(' ')):
-                if self.framing:
-                    self.framing = False
-                    self.cam.stop_framing()
-                else:
-                    self.framing = True
-                    self.cam.start_framing()                    
-            elif (k & 0xFF == ord('r')):
-                self.brightness = 0.0
-                self.contrast = 0.0
-                
-                # inject disturbance for testing purposes
-                self.cam.set_simulated_fsm_correction(2,2)
-
-                frame_uint8_scaled = self.adjust_brightness_contrast(
-                    self.frame_uint8,contrast=self.contrast,
-                    brightness=self.brightness)
-                frame_uint8_scaled = cv2.applyColorMap(frame_uint8_scaled,
-                                                       cv2.COLORMAP_JET)
-                self.annotate_image(frame_uint8_scaled,self.stars)
-                cv2.imshow(self.display_name,frame_uint8_scaled)
 
 #-------------------------------------------------------------------------------
     def set_loop_state(self,param):
@@ -888,11 +539,70 @@ class GuidingSystem():
         if param == 0:
             self.framing = False
             self.cam.stop_framing()
+            res = self.event_sender.send({'framing':0})
             print('Stopping camera framing')            
         elif param == 1:
             self.framing = True
+            self.cam.start_framing()
+            res = self.event_sender.send({'framing':1})
             print('Starting camera framing')
         return(0)
+
+#-------------------------------------------------------------------------------
+    def toggle_framing_state(self,param):
+        if param > 0:
+            if self.framing:
+                self.cam.stop_framing()
+                self.framing = False
+                res = self.event_sender.send({'framing':0})
+                print('Stopping camera framing')
+            elif param == 0:
+                self.framing = True
+                self.cam.start_framing()
+                res = self.event_sender.send({'framing':1})
+                print('Starting camera framing')
+        return(0)
+    
+#-------------------------------------------------------------------------------
+    def validate_roi(self,x1,y1,x2,y2):
+        if x1 >= x2:
+            return(False)
+        if y1 >= y2:
+            return(False)
+        if (x2-x1 > self.camera_xdim):
+            return(False)
+        if (y2-y1 > self.camera_ydim):
+            return(False)
+        if x1 < 0:
+            return(False)
+        if y1 < 0:
+            return(False)
+        if x1 > self.camera_xdim-1:
+            return(False)
+        if y1 > self.camera_ydim-1:
+            return(False)
+        if x2 > self.camera_xdim-1:
+            return(False)
+        if y2 > self.camera_ydim-1:
+            return(False)
+        return(True)
+        
+#-------------------------------------------------------------------------------
+    def set_roi(self,param):
+        print(param)
+        print(len(param))
+        if len(param) != 4:
+            return(-1)
+        
+#        res = self.validate_roi(param[0],param[1],param[2],param[3])
+#        if not res:
+#            print("Error validating ROI")
+#            return(False)
+        
+        self.cam.set_roi(param[0],param[1],param[2],param[3])
+        
+        return(0)
+
     
 #-------------------------------------------------------------------------------
     def command_callback(self,command_dict):
@@ -904,7 +614,7 @@ class GuidingSystem():
         print("Done with command processing")
 
 #-------------------------------------------------------------------------------
-    def perform_guiding(self,image,camera_xdim,camera_ydim,x1,x2,y1,y2):
+    def perform_guiding(self,image,camera_xdim_pix,camera_ydim_pix,x1,x2,y1,y2):
         '''
         This is where the action happens.
         Find stars in image and compute centroids of starlike objects.
@@ -914,16 +624,27 @@ class GuidingSystem():
         # Find stars and compute centroids in pixels
         (self.stars,img) = self.image_processor.get_stars(image)
 
-        
         if (len(self.stars) == 0):
             self.logger.info("No stars passed to perform_guiding.")
+            self.ndx = 0
+            self.x_mispointings_arcsec = [0.0]
+            self.y_mispointings_arcsec = [0.0]
+            self.ra_mispointings_arcsec = [0.0]
+            self.dec_mispointings_arcsec = [0.0]
+            self.x_correction_arcsec = 0.0
+            self.y_correction_arcsec = 0.0
+            self.ra_correction_arcsec = 0.0
+            self.dec_correction_arcsec = 0.0
+            self.flux_counts = 0.0
+            self.star_fwhm = 0.0
+            self.stars = np.array([])
             return
 
         # Add top left corner of ROI in order to have centroids be with
         # respect to full camera frame and then offset to place 0,0 in the
         # center of the camera
-        self.stars[:,0] += x1 - camera_xdim/2
-        self.stars[:,1] += y1 - camera_ydim/2
+        self.stars[:,0] += x1 - camera_xdim_pix/2
+        self.stars[:,1] += y1 - camera_ydim_pix/2
         
         # find the closest star to the desired science fiber position, keeping
         # offsets in mind. Fiber positions and offsets are in arcseconds, so
@@ -969,7 +690,7 @@ class GuidingSystem():
             self.logger.info('X Correction": '+ str(self.x_correction_arcsec) +\
                              ' Y Correction": ' + str(self.y_correction_arcsec))
                          
-            if (self.cam_type == 'simulated'):
+            if (self.cam_type == 'simulated') and self.guide_status == 'Closed':
                 self.cam.set_simulated_fsm_correction(self.x_correction_arcsec,
                                                       self.y_correction_arcsec)
             
@@ -1005,6 +726,15 @@ class GuidingSystem():
             # else:
             #     # TODO: move telescope, recenter tip/tilt
             #     self.logger.error("Tip/tilt out of range. Must manually recenter")
+        else:
+            self.x_correction_arcsec = [0.0]
+            self.y_correction_arcsec = [0.0]
+            self.ra_mispointings_arcsec = [0.0]
+            self.dec_mispointings_arcsec = [0.0]
+            self.ra_correction_arcsec = 0.0
+            self.dec_correction_arcsec = 0.0
+            self.flux_counts = 0.0
+            self.star_fwhm = 0.0
 
             
 #-------------------------------------------------------------------------------
@@ -1029,12 +759,34 @@ class GuidingSystem():
                         'counts':self.flux_counts,
                         'fwhm':self.star_fwhm,
                         'platescale':self.arcsec_per_pixel,
+                        'camera_xdim_pix':self.camera_xdim_pix,
+                        'camera_ydim_pix':self.camera_ydim_pix,
                         'roi_x1':self.x1,
                         'roi_x2':self.x2,
                         'roi_y1':self.y1,
                         'roi_y2':self.y2,
                         'height':h,
                         'width':w,
+                        'sci_fiber_x':self.sci_fiber_x,
+                        'sci_fiber_xwidth':self.sci_fiber_xwidth,
+                        'sci_hole_xwidth':self.sci_hole_xwidth,
+                        'sky_fiber_x':self.sky_fiber_x,
+                        'sky_fiber_xwidth':self.sky_fiber_xwidth,
+                        'sky_hole_xwidth':self.sky_hole_xwidth,
+                        'guider_magnification':self.guider_magnification,
+                        'arcsec_per_um_guider_ccd':self.arcsec_per_um_guider_ccd,
+                        'sci_fiber_y':self.sci_fiber_y,
+                        'sci_fiber_ywidth':self.sci_fiber_ywidth,
+                        'sci_hole_ywidth':self.sci_hole_ywidth,
+                        'sky_fiber_y':self.sky_fiber_y,
+                        'sky_fiber_ywidth':self.sky_fiber_ywidth,
+                        'sky_hole_ywidth':self.sky_hole_ywidth,
+                        'guider_magnification':self.guider_magnification,
+                        'camera_xcenter_pix':self.camera_xcenter_pix,
+                        'camera_ycenter_pix':self.camera_ycenter_pix,
+                        'pixel_size_um':self.pixel_size_um,
+                        'arcsec_per_um_guider_ccd':self.arcsec_per_um_guider_ccd,
+                        'stars':self.stars.tolist(),
                         'image':self.image.tolist()})
 
         self.telem_out.send('guider_data',telem_struct)
@@ -1042,21 +794,14 @@ class GuidingSystem():
             
 #-------------------------------------------------------------------------------
     def start(self):
-        if self.display:
-            flags = (cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO |
-                     cv2.WINDOW_GUI_NORMAL)
-            cv2.namedWindow(self.display_name,flags)
-            cv2.resizeWindow(self.display_name,self.screen_res,
-                             self.screen_res)
-            
-            cv2.setMouseCallback(self.display_name,self.mouse_event,self)
-        
         self.cam.start()
+        self.framing = True
         print("Camera framing started")
 
 #-------------------------------------------------------------------------------
     def stop(self):
         self.cam.stop_framing()
+        self.framing = False
 
 
 ################################################################################
@@ -1064,7 +809,7 @@ if __name__ == "__main__":
     base_directory = "./"
     
     guider = GuidingSystem(base_directory,
-                           cam_type='simulated',
+                           cam_type='asi',
                            tiptilt_type='simulated',
                            calstage_type='simulated')
     guider.start()
