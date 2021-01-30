@@ -97,8 +97,8 @@ class ASIGuiderCam(threading.Thread):
         self.logger.info("Setting frame rate to 1Hz")
         self.set_frame_period(1.0)
         self.set_gain(200)
-        self.logger.info("Setting exposure time to max for 0.2Hz framerate")
-        self.set_exposure_time(0.2)
+        self.logger.info("Setting exposure time to max for 1Hz framerate")
+        self.set_exposure_time(10.0)
 
         # Hardcoded here.  Should match values in tres_guider.ini
         self.arcsec_per_um_at_ccd = 0.02477
@@ -111,7 +111,7 @@ class ASIGuiderCam(threading.Thread):
         # Create three simulated stars
         self.star_xpositions = [0.0,-30.0,0.0]   # arcsec from center
         self.star_ypositions = [0.0,-30.0,-30.0] # arcsec from center
-        self.star_fluxes = [2e6,1.5e6,4.0e6]
+        self.star_fluxes = [2e8,1.5e8,4.0e8]
         self.star_fwhm = 1.0
         self.noise = 0.0
         self.background = 0
@@ -165,13 +165,15 @@ class ASIGuiderCam(threading.Thread):
         y1: (int) bottom right corner of image y coordinate        
         """
 
-        self.logger.info("Setting camera ROI to %i,%i,%i,%i" %
-                         (self.x1,self.y1,self.x2,self.y2))
+        self.logger.info("Setting camera ROI to %i:%i %i:%i" %
+                         (x1,x2,y1,y2))
         self.x1 = x1
         self.x2 = x2
         self.y1 = y1
         self.y2 = y2
+        self.camera.stop_video_capture()
         self.camera.set_roi(self.x1,self.y1,self.x2-self.x1,self.y2-self.y1)
+        self.camera.start_video_capture()        
 
 
 #-------------------------------------------------------------------------------
@@ -484,7 +486,7 @@ class ASIGuiderCam(threading.Thread):
                                                   background=self.background,
                                                   jitter=self.jitter_amplitude)
                 star_roi = ff_img[self.y1:self.y2,self.x1:self.x2]
-                roi = roi + star_roi
+#                roi = roi + star_roi
 
                 if (self.new_image_callback != None):
                     self.new_image_callback(self.dateobs,self.camera_xdim_pix,
