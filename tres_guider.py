@@ -19,9 +19,9 @@ import cv2
 import dfm_telescope as telescope
 
 import simulated_cam
-import asi_cam
+#import asi_cam
+import andor_cam
 #import adimec_q4a180
-#import andor_zyla
 
 import utils
 import tiptilt
@@ -316,7 +316,7 @@ class GuidingSystem():
                                                      new_image_callback=\
                                                      self.new_image_callback)
         elif self.cam_type == 'zyla':
-            self.cam = andor_zyla.ZylaGuiderCam(base_directory,'andor_cam.ini',
+            self.cam = andor_cam.AndorGuiderCam(base_directory,'zyla.ini',
                                                 new_image_callback=\
                                                 self.new_image_callback)
         elif self.cam_type == 'asi':
@@ -690,7 +690,8 @@ class GuidingSystem():
             self.logger.info('X Correction": '+ str(self.x_correction_arcsec) +\
                              ' Y Correction": ' + str(self.y_correction_arcsec))
                          
-            if (self.cam_type == 'simulated') and self.guide_status == 'Closed':
+            if ((self.cam_type == 'simulated' or self.cam_type == 'zyla'
+                 or self.cam_type == 'asi') and self.guide_status == 'Closed'):
                 self.cam.set_simulated_fsm_correction(self.x_correction_arcsec,
                                                       self.y_correction_arcsec)
             
@@ -809,7 +810,7 @@ if __name__ == "__main__":
     base_directory = "./"
     
     guider = GuidingSystem(base_directory,
-                           cam_type='asi',
+                           cam_type='zyla',
                            tiptilt_type='simulated',
                            calstage_type='simulated')
     guider.start()
