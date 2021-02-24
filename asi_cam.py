@@ -377,12 +377,12 @@ class ASIGuiderCam(threading.Thread):
         for ii in range(len(xpos)):
 
             xii = int(np.round(xpos[ii]/self.arcsec_per_pix +
-                               self.camera_xcenter_pix - self.x1 + 1 + \
+                               self.camera_xcenter_pix + \
                                (self.x_jitter_offset +
                                 self.simulated_fsm_x_correction) /
                                self.arcsec_per_pix))
             yii = int(np.round(ypos[ii]/self.arcsec_per_pix +
-                               self.camera_ycenter_pix - self.y1 + 1 + \
+                               self.camera_ycenter_pix + \
                                (self.y_jitter_offset +
                                 self.simulated_fsm_y_correction) /
                                self.arcsec_per_pix))
@@ -443,27 +443,6 @@ class ASIGuiderCam(threading.Thread):
         return(self.image)
 
 #-------------------------------------------------------------------------------
-    def tick(self):
-        ''' Deliver a simualted camera frame to the callback function'''
-        full_cam_img = self.simulate_star_image(self.star_xpositions,
-                                                self.star_ypositions,
-                                                self.star_fluxes,
-                                                self.star_fwhm,
-                                                noise=self.noise,
-                                                background=self.background,
-                                                jitter=self.jitter_amplitude)
-        roi = full_cam_img[self.y1:self.y2,self.x1:self.x2]
-        self.dateobs = datetime.datetime.utcnow()
-            
-        if (self.new_image_callback != None):
-            self.new_image_callback(self.dateobs,self.camera_xdim_pix,
-                                    self.camera_ydim_pix,self.x1,self.y1,
-                                    self.x2,self.y2,roi)
-                
-        self.frame_counter += 1;
-        
-            
-#-------------------------------------------------------------------------------
     def run(self):
         '''Start simulated camera readout of frames cv, and deliver to 
         guider callback function
@@ -486,7 +465,8 @@ class ASIGuiderCam(threading.Thread):
                                                   background=self.background,
                                                   jitter=self.jitter_amplitude)
                 star_roi = ff_img[self.y1:self.y2,self.x1:self.x2]
-#                roi = roi + star_roi
+                roi = roi * self.hole_mask[self.y1:self.y2,self.x1:self.x2] + \
+                      star_roi
 
                 if (self.new_image_callback != None):
                     self.new_image_callback(self.dateobs,self.camera_xdim_pix,
