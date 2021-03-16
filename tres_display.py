@@ -67,13 +67,23 @@ class TresDisplay():
 
         self.roi_size_pixels = 64
         self.command_sender = CommandSender(self.config)        
+
+        flags = (cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO |
+                 cv2.WINDOW_GUI_NORMAL)
+        cv2.namedWindow(self.display_name,flags)
+        cv2.resizeWindow(self.display_name,self.screen_res,
+                         self.screen_res)
+            
+        cv2.setMouseCallback(self.display_name,self.mouse_event,self)
+        cv2.startWindowThread()
         
         self.receive_task = asyncio.ensure_future(
             self.receive_telem(self.on_guider_data,
                                self.config['REDIS_SERVER'],
                                self.config['REDIS_PORT'],
                                'guider_data'))
-        
+        self.have_guider_data = False
+
 #-------------------------------------------------------------------------------
     @staticmethod
     async def receive_telem(callback,server,port,data_name):
@@ -128,10 +138,12 @@ class TresDisplay():
                                            self.roi_x2,self.roi_y2]})
 
         if event == cv2.EVENT_RBUTTONDOWN:
-            self.roi_x1 = 0
-            self.roi_x2 = self.camera_xdim_pix
-            self.roi_y1 = 0
-            self.roi_y2 = self.camera_ydim_pix
+            self.roi_x1 = self.camera_xdim_pix/2 - 128
+            self.roi_x2 = self.camera_xdim_pix/2 + 128
+            self.roi_y1 = self.camera_ydim_pix/2 - 128
+            self.roi_y2 = self.camera_ydim_pix/2 + 128
+
+            
             self.command_sender.send({'roi':[self.roi_x1,self.roi_y1,
                                            self.roi_x2,self.roi_y2]})
             
@@ -153,7 +165,7 @@ class TresDisplay():
                 frame_uint8_scaled = cv2.applyColorMap(frame_uint8_scaled,
                                                        cv2.COLORMAP_JET)
                 self.annotate_image(frame_uint8_scaled,self.stars)
-                cv2.imshow(self.display_name,frame_uint8_scaled)                
+                cv2.imshow(self.display_name,frame_uint8_scaled)
 
 #-------------------------------------------------------------------------------
     def cam_pix_to_display_pix(self,x,y):
@@ -413,6 +425,9 @@ class TresDisplay():
 
 #-------------------------------------------------------------------------------
     def refresh_image(self):
+        if not self.have_guider_data:
+            print("No images have arrived yet")
+            return
         self.rebin_factor = max(self.roi_x2-self.roi_x1,
                                 self.roi_y2-self.roi_y1) / self.screen_res
         width = int(np.round((self.roi_x2-self.roi_x1)/
@@ -437,8 +452,8 @@ class TresDisplay():
                                                cv2.COLORMAP_JET)
         self.annotate_image(frame_uint8_scaled,self.stars)            
         cv2.imshow(self.display_name,frame_uint8_scaled)
-
-        # q to quit, spacebar to stop/start framing, r to reset colormap
+        
+#        q to quit, spacebar to stop/start framing, r to reset colormap
         k = cv2.waitKey(1)
         if(k & 0xFF == ord('q')):
             cv2.destroyAllWindows()
@@ -456,6 +471,7 @@ class TresDisplay():
                                                    cv2.COLORMAP_JET)
             self.annotate_image(frame_uint8_scaled,self.stars)
             cv2.imshow(self.display_name,frame_uint8_scaled)
+
 
     
 #------------------------------------------------------------------------------
@@ -502,20 +518,19 @@ class TresDisplay():
         self.camera_ycenter_pix = new_data['camera_ycenter_pix']
         self.pixel_size_um = new_data['pixel_size_um']
         self.image = np.asarray(new_data['image'])
+        self.have_guider_data = True
         self.refresh_image()
         print("Done ingesting guider data")
 
 
-#------------------------------------------------------------------------------ 
-    def start(self):
-        flags = (cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO |
-                 cv2.WINDOW_GUI_NORMAL)
-        cv2.namedWindow(self.display_name,flags)
-        cv2.resizeWindow(self.display_name,self.screen_res,
-                         self.screen_res)
-            
-        cv2.setMouseCallback(self.display_name,self.mouse_event,self)
-   
+
+async def counter():
+    counter_val = 0
+    while True:
+        print("Mainloop counter: ",counter_val)
+        counter_val = counter_val + 1
+        await asyncio.sleep(0.1)
+
 ################################################################################
 if __name__ == "__main__":
     base_directory = './'
@@ -523,11 +538,11 @@ if __name__ == "__main__":
     config_file = 'tres_display.ini'
 
     tresdisplay = TresDisplay(base_directory,config_file)
-    tresdisplay.start()
+#    count = asyncio.ensure_future(counter())
     loop = asyncio.get_event_loop()
     try:
         loop.run_forever()
-    finally:
+    except:
         loop.close()
     
     print("TRES Display stopping")
