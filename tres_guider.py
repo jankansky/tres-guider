@@ -267,12 +267,15 @@ class GuidingSystem():
 
         self.command_tree = {'loop_state':self.set_loop_state,
                              'framing':self.set_framing_state,
+                             'exptime':self.set_exptime,
                              'toggle_framing':self.toggle_framing_state,
                              'roi':self.set_roi}
         
         # Start in open loop
         self.framing = True
+        res = self.event_sender.send({'framing':1})        
         self.guide_status = 'Open'
+        res = self.event_sender.send({'loop_state':0})
         self.save_images = False
 
         # Send data via redis telem channel?
@@ -335,6 +338,11 @@ class GuidingSystem():
         # Assume square ROI when tracking
         self.roi_size_pixels = (int(np.round(float(config['ROI_SIZE_ARCSEC']) /
                                              self.arcsec_per_pixel)))
+        self.cam.set_exposure_time(1.0)
+        self.cam.set_frame_period(1.0)
+        res = self.event_sender.send({'exptime':1.0})
+
+        
 
 
 #-------------------------------------------------------------------------------
@@ -531,6 +539,7 @@ class GuidingSystem():
         elif param == 1:
             self.guide_status = 'Closed'
             res = self.event_sender.send({'loop_state':1})
+            self.x_correction_arcsec += 3.0
             print('Closed loops')
         return(0)
             
@@ -548,6 +557,17 @@ class GuidingSystem():
             print('Starting camera framing')
         return(0)
 
+#-------------------------------------------------------------------------------
+    def set_exptime(self,param):
+        if param >= 0.2 and param < 1000:
+            self.framing = False
+            self.cam.stop_framing()
+            self.cam.set_frame_period(param)
+            self.cam.set_exposure_time(param)
+            self.cam.start_framing()            
+            res = self.event_sender.send({'exptime':param})
+        return(0)
+    
 #-------------------------------------------------------------------------------
     def toggle_framing_state(self,param):
         if param > 0:

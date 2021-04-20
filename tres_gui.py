@@ -130,7 +130,8 @@ class TresGUI(QWidget):
         self.region_radius = 20
 
         self.event_tree = {'loop_state':self.on_loop_changed,
-                           'framing':self.on_framing_changed}
+                           'framing':self.on_framing_changed,
+                           'exptime':self.on_exptime_changed}
         
         self.receive_task = asyncio.ensure_future(
             self.receive_telem(self.on_guider_data,
@@ -415,6 +416,17 @@ class TresGUI(QWidget):
             res = self.command_sender.send({'loop_state':0})
             print("Opening loops")
 
+#-------------------------------------------------------------------------------
+    def on_set_exptime(self,checked):
+        print("In on_set_exptime")
+        print(self.ui.exptime1SpinBox.value())
+        self.command_sender.send({'exptime':self.ui.exptime1SpinBox.value()})
+
+#-------------------------------------------------------------------------------
+    def on_exptime_changed(self,sval):
+        print("Got message that exposure time changed")
+        self.ui.exptime1Edit.setText(str(sval))
+        
 #-------------------------------------------------------------------------------
     def on_loop_changed(self,sval):
         print("Got message that loop state changed")

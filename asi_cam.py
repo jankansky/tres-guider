@@ -96,7 +96,7 @@ class ASIGuiderCam(threading.Thread):
         self.set_roi(self.x1,self.y1,self.x2,self.y2)
         self.logger.info("Setting frame rate to 1 Hz")
         self.set_frame_period(1.0)
-        self.set_gain(200)
+        self.set_gain(100)
         self.logger.info("Setting exposure time to max for 1Hz framerate")
         self.set_exposure_time(1.0)
 
@@ -109,9 +109,9 @@ class ASIGuiderCam(threading.Thread):
         
 
         # Create three simulated stars
-        self.star_xpositions = [0.0,-30.0,0.0]   # arcsec from center
-        self.star_ypositions = [0.0,-30.0,-30.0] # arcsec from center
-        self.star_fluxes = [2e8,1.5e8,4.0e8]
+        self.star_xpositions = [0.0,-7.0,0.0]   # arcsec from center
+        self.star_ypositions = [0.0,-7.0,-7.0] # arcsec from center
+        self.star_fluxes = [0.7e8,1.5e8,0.5e8]
         self.star_fwhm = 1.0
         self.noise = 0.0
         self.background = 0

@@ -65,7 +65,7 @@ class TresDisplay():
         self.contrast = 0.0
         self.brightness = 0.0
 
-        self.roi_size_pixels = 64
+        self.roi_size_pixels = 96
         self.command_sender = CommandSender(self.config)        
 
         flags = (cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO |
