@@ -19,8 +19,8 @@ import cv2
 import dfm_telescope as telescope
 
 import simulated_cam
-#import asi_cam
-import andor_cam
+import asi_cam
+#import andor_cam
 #import adimec_q4a180
 
 import utils
@@ -810,7 +810,7 @@ if __name__ == "__main__":
     base_directory = "./"
     
     guider = GuidingSystem(base_directory,
-                           cam_type='zyla',
+                           cam_type='asi',
                            tiptilt_type='simulated',
                            calstage_type='simulated')
     guider.start()

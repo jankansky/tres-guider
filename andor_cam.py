@@ -162,10 +162,10 @@ class AndorGuiderCam(threading.Thread):
         y2: (int) bottom right corner of image y coordinate        
         """
         
-        self.x1 = x1
-        self.x2 = x2
-        self.y1 = y1
-        self.y2 = y2
+        self.x1 = int(x1)
+        self.x2 = int(x2)
+        self.y1 = int(y1)
+        self.y2 = int(y2)
         self.imager.AOIWidth = self.x2 - self.x1
         self.imager.AOILeft = self.x1 + 1
         self.imager.AOIHeight = self.y2 - self.y1
@@ -456,8 +456,15 @@ class AndorGuiderCam(threading.Thread):
                                                 noise=self.noise,
                                                 background=self.background,
                                                 jitter=self.jitter_amplitude)
+        sim_star_roi = sim_star_img[self.y1:self.y2,self.x1:self.x2] 
+        if (cam_image.shape != sim_star_roi.shape):
+                    print("Mismatch between camera frame and current ROI")
+                    print(roi.shape)
+                    print(star_roi.shape)
+                    continue
+        
         roi = cam_image * self.hole_mask[self.y1:self.y2,self.x1:self.x2] \
-              + sim_star_img[self.y1:self.y2,self.x1:self.x2]
+              + sim_star_roi
         self.dateobs = datetime.datetime.utcnow()
             
         if (self.new_image_callback != None):
